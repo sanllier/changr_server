@@ -30,10 +30,15 @@ Log& Log::operator<<( const std::string& logData )
 	const int bufLen = 80;
     char buffer[ bufLen ];
 
+	outMutex.lock();
+
     std::time( &rawtime );
     timeinfo = std::localtime( &rawtime );
     std::strftime(buffer, bufLen, "%Y-%m-%d %H:%M:%S", timeinfo);
-	logStream << buffer << " | " << logData << "\r\n";    
+	logStream << buffer << " | " << logData << "\r\n"; 
+	logStream.flush();
+
+	outMutex.unlock();
 
 	return *this;
 }

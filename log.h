@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <string>
+#include <mutex>
 
 class Log
 {
@@ -24,4 +25,5 @@ private:
 	static char logFile[ 255 ];
 
 	std::ofstream logStream;
+	std::mutex outMutex;
 };

@@ -1,6 +1,7 @@
 #include "server.h"
 #include "exception.h"
 #include "log.h"
+#include "servertypes.h"
 
 #include <string>
 
@@ -15,7 +16,6 @@ int Server::servers = 0;
 Server::Server( u_short port )
 	:listenSock(0)
 	,isListen(false)
-	,listenThread(0)
 {
 	if ( servers < 0 )
 		throw Exception( std::string( "Negative number of working servers." ), 
@@ -55,10 +55,13 @@ Server::Server( u_short port )
             local_addr.sin_port = htons( port );
             local_addr.sin_addr.s_addr = 0;
 
-			if ( ( errorCode = bind( listenSock, ( sockaddr* )&local_addr, sizeof( local_addr ) ) ) )
+			if ( bind( listenSock, ( sockaddr* )&local_addr, sizeof( local_addr ) ) )
+			{
+				errorCode = WSAGetLastError();
 				throw Exception( std::string( "Error while binding socket." ), 
 								 std::string( "server.cpp : Server::Server(void)" ), 
 								 Exception::ExcData( &errorCode, sizeof( errorCode ) ) );
+			}
 			Log::getLog() << std::string( "listen socket was bound" );
 			Log::getLog() << std::string( "server was initialized" );
 		}
@@ -71,10 +74,24 @@ Server::Server( u_short port )
 
 Server::~Server(void)
 {
+	if ( isListen )
+	{
+		isListen = false;
+		listenThread.waitAll();
+		listenThread.clean();
+	}
+
 	if ( listenSock )
-		 closesocket( listenSock );
+		closesocket( listenSock );
+
+	if ( clientThreads.getThreadsNum() )
+	{
+		clientThreads.waitAll();
+		clientThreads.clean();
+	}
 
 	--servers;
+
 	Log::getLog() << std::string( "server shutdown. Still working: " ).append( std::to_string( servers ) );
 
 	if ( servers == 0 )
@@ -83,15 +100,16 @@ Server::~Server(void)
 
 // ---------------------------------------------
 
-std::thread* Server::listenGo( int queue_size )
+void Server::listenGo( int queueSize )
 {
 	if ( isListen )
-		return listenThread;
+		return;
 
-	MUTEXED_ASSIGN( isListenMutex, isListen, true );
-	listenThread = new std::thread( &Server::listenState, this );
-
-	return listenThread;
+	isListen = true;
+	Server* ref = this;
+	listenThread.addThread( std::async( std::launch::async, 
+		                                [ queueSize, ref ] {  listenState( queueSize, ref ); 
+	                                    return true; } ) );
 }
 
 void Server::listenStop( void )
@@ -99,39 +117,108 @@ void Server::listenStop( void )
 	if ( !isListen )
 		return;
 
-    MUTEXED_ASSIGN( isListenMutex, isListen, false );
-	listenThread = 0;
+	isListen = false;
+	listenThread.waitAll();
+	listenThread.clean();
 }
 
-void Server::listenState( void )
+void listenState( int queueSize, Server* obj )
 {
 	int errorCode;
 
-	while ( isListen )
+	if ( listen( obj->listenSock, queueSize ) )
 	{
-		if ( errorCode = listen( listenSock, QUEUE_SIZE ) )
+		errorCode = WSAGetLastError();
+		obj->isListen = false;
+		throw Exception( std::string( "Error while trying listen socket." ), 
+			             std::string( "server.cpp : void Server::listenGo( void )" ), 
+						 Exception::ExcData( &errorCode, sizeof( errorCode ) ) );
+	}
+
+	SOCKET clientSocket;   
+    sockaddr_in clientAddr;    
+    int clientAddrSize = sizeof( clientAddr );
+	
+	fd_set readSet;
+    timeval timeout;
+    timeout.tv_sec = 0; 
+    timeout.tv_usec = 0;
+
+	while ( obj->isListen )
+	{
+		FD_ZERO( &readSet );
+	    FD_SET( obj->listenSock, &readSet );
+
+		int temp = select( obj->listenSock, &readSet, NULL, NULL, &timeout );
+		if( temp == 1 )
 		{
-			MUTEXED_ASSIGN( isListenMutex, isListen, false );
-			throw Exception( std::string( "Error while trying listen socket." ), 
-				             std::string( "server.cpp : void Server::listenGo( void )" ), 
-							 Exception::ExcData( &errorCode, sizeof( errorCode ) ) );
-		}
-
-		SOCKET client_socket;   
-        sockaddr_in client_addr;    
-        int client_addr_size = sizeof( client_addr );
-
-		while( isListen && ( client_socket = accept(listenSock, ( sockaddr* )&client_addr, &client_addr_size ) ) )
-        {
+			clientSocket = accept( obj->listenSock, ( sockaddr* )&clientAddr, &clientAddrSize );
 			Log::getLog() << "looks like somebody connected";
 
-            HOSTENT* host;
-            host = gethostbyaddr( ( char* )&client_addr.sin_addr.s_addr, 4, AF_INET );
-			Log::getLog() << std::string( "connected: " ).append( host->h_name ) \
-				                                         .append( " " )          \
-														 .append( inet_ntoa( client_addr.sin_addr ) );
+			obj->clientThreads.addThread( std::async( std::launch::async, 
+		                                  [ clientSocket, obj ] {  clientRoutine( clientSocket, obj ); 
+	                                      return true; } ) );
 		}
 	}
+
+	//std::thread clientThread( &Server::clientRoutine, obj, clientSocket );
+}
+
+// ---------------------------------------------
+
+size_t Server::recvData( SOCKET sock, void* buf, size_t bufLen )
+{
+	if ( !buf || !bufLen )
+		return 0;
+
+	char* charBuf = ( char* )buf;
+	size_t bytesRecved = 0;
+	size_t totalRecved = 0;
+	while ( bufLen && ( bytesRecved = recv( sock, charBuf, bufLen, 0 ) ) )
+	{
+		bufLen      -= bytesRecved;
+		totalRecved += bytesRecved;
+		charBuf     += bytesRecved;
+	}	
+
+	return totalRecved;
+}
+
+size_t Server::sendData( SOCKET sock, const void* data, size_t dataLen )
+{
+	if ( !data || !dataLen )
+		return 0;
+
+	char* charData = ( char* )data;
+	size_t bytesSended = 0;
+	size_t totalSended = 0;
+	while ( dataLen && ( bytesSended = send( sock, charData, dataLen, 0 ) ) )
+	{
+		dataLen     -= bytesSended;
+		totalSended += bytesSended;
+		charData    += bytesSended;
+	}
+
+	return totalSended;
+}
+
+// ---------------------------------------------
+
+void clientRoutine( SOCKET sock, Server* obj )
+{
+	Greeting helloStruct;
+    const size_t helloSize = obj->recvData( sock, &helloStruct, sizeof( helloStruct ) );
+
+	if ( helloSize == sizeof( Greeting ) && CHECK_MAGIC( helloStruct ) )
+	{
+		Log::getLog() << std::string( "ok, user ").append( helloStruct.id ) \
+		                                      .append( " says: " ) \
+											  .append( std::to_string( helloStruct.cmd ) );
+	}
+	else
+	{
+		Log::getLog() << "client refused";
+	}	
 }
 
 }

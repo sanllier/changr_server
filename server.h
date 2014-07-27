@@ -1,10 +1,10 @@
 #pragma once
 
-#include <WinSock2.h>
-#include <mutex>
-#include <thread>
+#include "threadholder.h"
 
-#define MUTEXED_ASSIGN(mutex, a, b) { mutex.lock(); a = b; mutex.unlock(); }
+#include <WinSock2.h>
+
+// #define MUTEXED_ASSIGN(mutex, a, b) { mutex.lock(); a = b; mutex.unlock(); }
 
 namespace server
 {
@@ -20,19 +20,23 @@ public:
 	Server( u_short port );
 	~Server(void);
 
-	std::thread* listenGo( int queue_size = QUEUE_SIZE );
+	void listenGo( int queueSize = QUEUE_SIZE );
 	void listenStop( void );
 private:
-	void listenState( void );
+	size_t recvData( SOCKET sock, void* buf, size_t bufLen );
+	size_t sendData( SOCKET sock, const void* data, size_t dataLen );
+
+	friend void listenState( int queueSize, Server* obj );
+	friend void clientRoutine( SOCKET soc, Server* obj );
 private:
 	static int servers;
 
 	SOCKET listenSock;
-
 	bool isListen;
-	std::mutex isListenMutex;
+	// std::mutex isListenMutex;
 
-	std::thread* listenThread;
+	ThreadHolder listenThread;
+	ThreadHolder clientThreads;
 };
 
 }

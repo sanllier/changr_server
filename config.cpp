@@ -58,7 +58,7 @@ void Config::reload( void )
 		auto foundVal = conf.find( key );
 		if ( foundVal != conf.end() )
 		{
-			Log::getLog() << std::string( " Config value redefinition: " ).append( key ) \
+			Log::getLog() << std::string( "config value redefinition: " ).append( key ) \
 																		  .append( " = " ) \
 																		  .append( conf[ key ] ) \
 																		  .append( " <- " ) \
@@ -69,7 +69,28 @@ void Config::reload( void )
 			conf[ key ] = val;
 	}
 
+	Log::getLog() << std::string( "config file was loaded" );
 	confFile.close();
+}
+
+std::string& Config::modify( const std::string& key )
+{
+	auto found = conf.find( key );
+
+	if ( found != conf.end() )
+	{
+		Log::getLog() << std::string( "config value could be redefinitioned: " ).append( key ) \
+																	       	    .append( " = " ) \
+																		        .append( conf[ key ] ) \
+																		        .append( " <- " ) \
+																		        .append( "UNK" );
+		return found->second;
+	}
+	else
+	{
+		conf[ key ] = std::string();
+		return conf.find( key )->second;
+	}
 }
 
 // ---------------------------------------------

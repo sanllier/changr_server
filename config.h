@@ -13,6 +13,7 @@ public:
 	~Config( void );
 
 	void reload( void );
+	std::string& modify( const std::string& key );
 
 	std::string getString( const std::string& key, const std::string& def ) const;
 	int getInt( const std::string& key, int def ) const;

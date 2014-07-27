@@ -2,6 +2,9 @@
 #include "exception.h"
 #include "log.h"
 #include "servertypes.h"
+#include "config.h"
+#include "configpresets.h"
+#include "commandline.h"
 
 #include <string>
 
@@ -22,10 +25,14 @@ Server::Server( u_short port )
 		                 std::string( "server.cpp : Server::Server(void)" ), 
 						 Exception::ExcData( &servers, sizeof( servers ) ) );
 
-	if ( servers < MAX_SERVERS )
+	if ( servers < config::Config::getConfig().getInt( config::MAX_SERVERS, 32 ) )
 	{
-		const WORD requestedVersion = MAKEWORD( LO_VER, HI_VER );
+		const config::Config& conf = config::Config::getConfig();
+		unsigned char loVer = conf.getUChar( config::WINSOCK_LO_VER, 2 );
+		unsigned char hiVer = conf.getUChar( config::WINSOCK_HI_VER, 2 );
+		const WORD requestedVersion = MAKEWORD( loVer, hiVer );
         WSADATA wsaData;
+
 		int errorCode = WSAStartup( requestedVersion, &wsaData );
 
 		if ( errorCode )
@@ -36,7 +43,7 @@ Server::Server( u_short port )
 		}
 		else
 		{
-			if ( LOBYTE( wsaData.wVersion ) != LO_VER || HIBYTE( wsaData.wVersion ) != HI_VER )
+			if ( LOBYTE( wsaData.wVersion ) != loVer || HIBYTE( wsaData.wVersion ) != hiVer )
 				throw Exception( std::string( "WinSoc DLL is not support requested version." ), 
 								 std::string( "server.cpp : Server::Server(void)" ), 
 								 Exception::ExcData( &requestedVersion, sizeof( requestedVersion ) ) );
@@ -100,10 +107,12 @@ Server::~Server(void)
 
 // ---------------------------------------------
 
-void Server::listenGo( int queueSize )
+void Server::listenGo( void )
 {
 	if ( isListen )
 		return;
+
+	int queueSize = config::Config::getConfig().getInt( config::LISTEN_QUEUE_SIZE, 20 );
 
 	isListen = true;
 	Server* ref = this;
@@ -154,6 +163,7 @@ void listenState( int queueSize, Server* obj )
 		{
 			clientSocket = accept( obj->listenSock, ( sockaddr* )&clientAddr, &clientAddrSize );
 			Log::getLog() << "looks like somebody connected";
+			Commandline::getCM().print( "Looks like somebody connected" );
 
 			obj->clientThreads.addThread( std::async( std::launch::async, 
 		                                  [ clientSocket, obj ] {  clientRoutine( clientSocket, obj ); 

@@ -4,15 +4,8 @@
 
 #include <WinSock2.h>
 
-// #define MUTEXED_ASSIGN(mutex, a, b) { mutex.lock(); a = b; mutex.unlock(); }
-
 namespace server
 {
-
-static const int MAX_SERVERS = 32;
-static const int HI_VER = 2;
-static const int LO_VER = 2;
-static const int QUEUE_SIZE = 100;
 
 class Server
 {
@@ -20,7 +13,7 @@ public:
 	Server( u_short port );
 	~Server(void);
 
-	void listenGo( int queueSize = QUEUE_SIZE );
+	void listenGo( void );
 	void listenStop( void );
 private:
 	size_t recvData( SOCKET sock, void* buf, size_t bufLen );
@@ -33,7 +26,6 @@ private:
 
 	SOCKET listenSock;
 	bool isListen;
-	// std::mutex isListenMutex;
 
 	ThreadHolder listenThread;
 	ThreadHolder clientThreads;

@@ -1,4 +1,7 @@
 #include "exception.h"
+#include "log.h"
+
+#include <string>
 
 namespace server
 {
@@ -69,7 +72,9 @@ Exception::Exception( const std::string& what, const std::string& location, cons
 	 ,excLocation( location )
 	 ,excData( data )	
 {
-
+	Log::getLog() << std::string( "Exception was created. What: " ).append( what ) \
+		                                                           .append( " Where: " ) \
+																   .append( location );
 }
 
 Exception::~Exception(void)
